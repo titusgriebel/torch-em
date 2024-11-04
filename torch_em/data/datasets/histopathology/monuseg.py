@@ -92,26 +92,25 @@ def _process_monuseg(path, split):
 
 
 def get_monuseg_dataset(
-    path, patch_shape, split, organ_type: Optional[List[str]] = None, download=False,
+    path, patch_shape, split, organ_type=None, download=False,
     offsets=None, boundaries=False, binary=False, **kwargs
 ):
     """Dataset from https://monuseg.grand-challenge.org/Data/
     """
     _download_monuseg(path, download, split)
-
     image_paths = sorted(glob(os.path.join(path, "images", split, "*")))
     label_paths = sorted(glob(os.path.join(path, "labels", split, "*")))
-
+    organ_type = [organ_type, '']
     if split == "train" and organ_type is not None:
         # get all patients for multiple organ selection
-        all_organ_splits = sum([ORGAN_SPLITS[_o] for _o in organ_type], [])
+        all_organ_splits = sum([ORGAN_SPLITS[organ_type]])
 
         image_paths = [_path for _path in image_paths if Path(_path).stem in all_organ_splits]
         label_paths = [_path for _path in label_paths if Path(_path).stem in all_organ_splits]
 
     elif split == "test" and organ_type is not None:
         # we don't have organ splits in the test dataset
-        raise ValueError("The test split does not have any organ informations, please pass `organ_type=None`")
+        raise ValueError("The test split does not have any organ information, please pass `organ_type=None`")
 
     kwargs, _ = util.add_instance_label_transform(
         kwargs, add_binary_target=True, binary=binary, boundaries=boundaries, offsets=offsets
