@@ -77,7 +77,8 @@ def _convert_to_hdf5(path, fold):
         # original (raw) shape : S x H x W x C -> transposed shape (expected) : C x S x H x W
         img = np.load(img_path)
         labels = np.load(gt_path)
-
+        print('Img array, labels array shape: ', img.shape, labels.shape)
+        breakpoint()
         instances = _channels_to_instances(labels)
         semantic = _channels_to_semantics(labels)
 

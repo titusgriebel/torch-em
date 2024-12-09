@@ -4,7 +4,7 @@ in H&E stained histopathology images.
 The dataset is located at https://doi.org/10.5281/zenodo.1175282.
 Please cite it if you use this dataset for your research.
 """
-
+import numpy as np
 import os
 import shutil
 from glob import glob
@@ -19,8 +19,9 @@ from skimage.measure import label as connected_components
 from torch.utils.data import Dataset, DataLoader
 
 import torch_em
-
-from .. import util
+import h5py
+from torch_em.data.datasets import util
+import tifffile
 
 
 URL = "https://zenodo.org/records/1175282/files/TNBC_NucleiSegmentation.zip"
@@ -40,7 +41,6 @@ def _preprocess_images(path):
         raw = imageio.imread(rpath)
         raw = raw[..., :-1].transpose(2, 0, 1)  # remove 4th alpha channel (seems like an empty channel).
         label = imageio.imread(lpath)
-
         vol_path = os.path.join(preprocessed_dir, f"{Path(lpath).stem}.h5")
 
         with h5py.File(vol_path, "w") as f:
@@ -52,6 +52,24 @@ def _preprocess_images(path):
 
     shutil.rmtree(os.path.join(path, "TNBC_NucleiSegmentation"))
     shutil.rmtree(os.path.join(path, "__MACOSX"))
+
+
+def get_tiffs(path):
+    os.makedirs((os.path.join(path, 'images')), exist_ok=True)
+    os.makedirs((os.path.join(path, 'labels')), exist_ok=True)
+    for file in glob(os.path.join(path, 'preprocessed', '*.h5')): 
+        with h5py.File(file, 'r') as f:
+            img_data = f['raw']
+            label_data = f['labels/instances']
+            basename = os.path.basename(file)
+            name, ext = os.path.splitext(basename)
+            img_output_path = os.path.join(path, 'images', f'{name}.tiff')
+            tifffile.imwrite(img_output_path, img_data)
+            label_output_path = os.path.join(path, 'labels', f'{name}.tiff')
+            tifffile.imwrite(label_output_path, label_data)
+    image_paths = natsorted(glob(os.path.join(path, 'images', '*.tiff')))
+    label_paths = natsorted(glob(os.path.join(path, 'labels', '*.tiff')))
+    return image_paths, label_paths
 
 
 def get_tnbc_data(path: Union[os.PathLike, str], download: bool = False) -> str:
@@ -76,8 +94,6 @@ def get_tnbc_data(path: Union[os.PathLike, str], download: bool = False) -> str:
 
     _preprocess_images(path)
 
-    return data_dir
-
 
 def get_tnbc_paths(path: Union[os.PathLike, str], download: bool = False) -> List[int]:
     """Get paths to the TNBC data.
@@ -89,9 +105,9 @@ def get_tnbc_paths(path: Union[os.PathLike, str], download: bool = False) -> Lis
     Returns:
         List of filepaths to the preprocessed image data.
     """
-    data_dir = get_tnbc_data(path, download)
-    volume_paths = natsorted(glob(os.path.join(data_dir, "*.h5")))
-    return volume_paths
+    get_tnbc_data(path, download)
+    image_paths, label_paths = get_tiffs(path)
+    return image_paths, label_paths
 
 
 def get_tnbc_dataset(
@@ -108,18 +124,18 @@ def get_tnbc_dataset(
     Returns:
         The segmentation dataset.
     """
-    label_choice = "instances"  # semantic / instances
-
-    volume_paths = get_tnbc_paths(path, download)
+    image_paths, label_paths = get_tnbc_paths(path, download)
+    kwargs, _ = util.add_instance_label_transform(
+        kwargs, add_binary_target=True, binary=False, boundaries=False, offsets=None
+    )
 
     return torch_em.default_segmentation_dataset(
-        raw_paths=volume_paths,
-        raw_key="raw",
-        label_paths=volume_paths,
-        label_key=f"labels/{label_choice}",
+        raw_paths=image_paths,
+        raw_key=None,
+        label_paths=label_paths,
+        label_key=None,
         patch_shape=patch_shape,
-        is_seg_dataset=True,
-        with_channels=True,
+        is_seg_dataset=False,
         **kwargs
     )
 

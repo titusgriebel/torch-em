@@ -14,11 +14,12 @@ from tqdm import tqdm
 from pathlib import Path
 from natsort import natsorted
 from typing import Union, Literal, List, Tuple
-
+import tifffile as tiff
 import numpy as np
 import imageio.v3 as imageio
 
 from torch.utils.data import Dataset, DataLoader
+import h5py
 
 import torch_em
 
@@ -42,8 +43,25 @@ CHECKSUM = {
 }
 
 
+def get_tiffs(path, annotations):
+    os.makedirs((os.path.join(path, 'images')), exist_ok=True)
+    os.makedirs((os.path.join(path, 'labels')), exist_ok=True)
+    for file in glob(os.path.join(path, 'preprocessed', '*.h5')): 
+        with h5py.File(file, 'r') as f:
+            img_data = f['raw']
+            label_data = f[f'labels/{annotations}']
+            basename = os.path.basename(file)
+            name, ext = os.path.splitext(basename)
+            img_output_path = os.path.join(path, 'images', f'{name}.tiff')
+            tiff.imwrite(img_output_path, img_data)
+            label_output_path = os.path.join(path, 'labels', f'{name}.tiff')
+            tiff.imwrite(label_output_path, label_data)
+    image_paths = natsorted(glob(os.path.join(path, 'images', '*.tiff')))
+    label_paths = natsorted(glob(os.path.join(path, 'labels', '*.tiff')))
+    return image_paths, label_paths
+
+
 def _preprocess_inputs(path, annotations):
-    import h5py
     import geopandas as gpd
     from rasterio.features import rasterize
     from rasterio.transform import from_bounds
@@ -79,6 +97,9 @@ def _preprocess_inputs(path, annotations):
         with h5py.File(volume_path, "a") as f:
             if "raw" not in f.keys():
                 f.create_dataset("raw", data=image, compression="gzip")
+
+            if "labels" not in f.keys():
+                f.create_group("labels")
 
             if f"{annotations}" not in f["labels"].keys():
                 f.create_dataset(f"labels/{annotations}", data=mask, compression="gzip")
@@ -140,9 +161,7 @@ def get_puma_paths(
         List of filepaths for the input data.
     """
     get_puma_data(path, annotations, download)
-    volume_paths = natsorted(glob(os.path.join(path, "preprocessed", "*.h5")))
-    return volume_paths
-
+    return get_tiffs(path, annotations)
 
 def get_puma_dataset(
     path: Union[os.PathLike, str],
@@ -163,17 +182,19 @@ def get_puma_dataset(
     Returns:
         The segmentation dataset.
     """
-    volume_paths = get_puma_paths(path, annotations, download)
+    image_paths, label_paths = get_puma_paths(path, annotations, download)
+    print(len(image_paths))
+    kwargs, _ = util.add_instance_label_transform(
+        kwargs, add_binary_target=True, binary=False, boundaries=False, offsets=None
+    )
 
     return torch_em.default_segmentation_dataset(
-        raw_paths=volume_paths,
-        raw_key="raw",
-        label_paths=volume_paths,
-        label_key=f"labels/{annotations}",
+        raw_paths=image_paths,
+        raw_key=None,
+        label_paths=label_paths,
+        label_key=None,
         patch_shape=patch_shape,
-        with_channels=True,
-        is_seg_dataset=True,
-        ndim=2,
+        is_seg_dataset=False,
         **kwargs
     )
 
