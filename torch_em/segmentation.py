@@ -313,6 +313,7 @@ def default_segmentation_dataset(
     verify_paths: bool = True,
     with_padding: bool = True,
     z_ext: Optional[int] = None,
+    deterministic_indices: bool = False,
 ) -> torch.utils.data.Dataset:
     """Get data set for training a segmentation network.
 
@@ -389,6 +390,8 @@ def default_segmentation_dataset(
             with_label_channels=with_label_channels,
             with_padding=with_padding,
             z_ext=z_ext,
+            deterministic_indices=deterministic_indices,
+
         )
 
     else:

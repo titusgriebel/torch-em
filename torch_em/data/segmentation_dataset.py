@@ -80,6 +80,7 @@ class SegmentationDataset(torch.utils.data.Dataset):
         with_label_channels: bool = False,
         with_padding: bool = True,
         z_ext: Optional[int] = None,
+        deterministic_indices: bool = False,
     ):
         self.raw_path = raw_path
         self.raw_key = raw_key
@@ -91,6 +92,7 @@ class SegmentationDataset(torch.utils.data.Dataset):
 
         self._with_channels = with_channels
         self._with_label_channels = with_label_channels
+        self.deterministic_indices = deterministic_indices
 
         if roi is not None:
             if isinstance(roi, slice):
@@ -158,7 +160,6 @@ class SegmentationDataset(torch.utils.data.Dataset):
                 z_diff = self.shape[0] - self.z_ext
                 bb_start = [np.random.randint(0, z_diff) if z_diff > 0 else 0] + [0] * len(self.shape[1:])
                 patch_shape_for_bb = (self.z_ext, *self.shape[1:])
-
         else:
             bb_start = [
                 np.random.randint(0, sh - psh) if sh - psh > 0 else 0 for sh, psh in zip(self.shape, self.sample_shape)
@@ -167,23 +168,26 @@ class SegmentationDataset(torch.utils.data.Dataset):
 
         return tuple(slice(start, start + psh) for start, psh in zip(bb_start, patch_shape_for_bb))
 
-    def _get_desired_raw_and_labels(self):
+    def _get_desired_raw_and_labels(self, index):
         bb = self._sample_bounding_box()
+        if self.deterministic_indices:
+            bb = (slice(index, index + 1, None), bb[1], bb[2])
         bb_raw = (slice(None),) + bb if self._with_channels else bb
         bb_labels = (slice(None),) + bb if self._with_label_channels else bb
         raw, labels = self.raw[bb_raw], self.labels[bb_labels]
+
         return raw, labels
 
-    def _get_sample(self, index):
+    def _get_sample(self, index=None):
         if self.raw is None or self.labels is None:
             raise RuntimeError("SegmentationDataset has not been properly deserialized.")
 
-        raw, labels = self._get_desired_raw_and_labels()
+        raw, labels = self._get_desired_raw_and_labels(index)
 
         if self.sampler is not None:
             sample_id = 0
             while not self.sampler(raw, labels):
-                raw, labels = self._get_desired_raw_and_labels()
+                raw, labels = self._get_desired_raw_and_labels(index)
                 sample_id += 1
                 if sample_id > self.max_sampling_attempts:
                     raise RuntimeError(f"Could not sample a valid batch in {self.max_sampling_attempts} attempts")
