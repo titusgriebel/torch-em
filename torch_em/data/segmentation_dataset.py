@@ -178,7 +178,7 @@ class SegmentationDataset(torch.utils.data.Dataset):
 
         return raw, labels
 
-    def _get_sample(self, index=None):
+    def _get_sample(self, index):
         if self.raw is None or self.labels is None:
             raise RuntimeError("SegmentationDataset has not been properly deserialized.")
 
