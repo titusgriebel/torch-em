@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Optional, Sequence, Union
 
 import imageio.v3 as imageio
@@ -15,8 +16,7 @@ TIF_EXTS = (".tif", ".tiff")
 
 
 def supports_memmap(image_path):
-    """@private
-    """
+    """@private"""
     if tifffile is None:
         return False
     ext = os.path.splitext(image_path)[1]
@@ -30,17 +30,21 @@ def supports_memmap(image_path):
 
 
 def load_image(image_path, memmap=True):
-    """@private
-    """
+    """@private"""
     if supports_memmap(image_path) and memmap:
         return tifffile.memmap(image_path, mode="r")
-    elif tifffile is not None and os.path.splitext(image_path)[1].lower() in (".tiff", ".tif"):
+    elif tifffile is not None and os.path.splitext(image_path)[1].lower() in (
+        ".tiff",
+        ".tif",
+    ):
         return tifffile.imread(image_path)
     elif os.path.splitext(image_path)[1].lower() == ".nrrd":
         import nrrd
+
         return nrrd.read(image_path)[0]
     elif os.path.splitext(image_path)[1].lower() == ".mha":
         import SimpleITK as sitk
+
         image = sitk.ReadImage(image_path)
         return sitk.GetArrayFromImage(image)
     else:
@@ -48,8 +52,8 @@ def load_image(image_path, memmap=True):
 
 
 class MultiDatasetWrapper:
-    """@private
-    """
+    """@private"""
+
     def __init__(self, *file_datasets):
         # Make sure we have the same shapes.
         reference_shape = file_datasets[0].shape
@@ -87,8 +91,8 @@ def load_data(
     Returns:
         The loaded data.
     """
-    have_single_file = isinstance(path, str)
-    have_single_key = isinstance(key, str)
+    have_single_file = isinstance(path, (str, Path))
+    have_single_key = isinstance(key, (str, Path))
 
     # mrc files require key="data"; set it automatically if no key was provided
     if key is None:
@@ -112,4 +116,6 @@ def load_data(
         elif not have_single_key and have_single_file:
             return MultiDatasetWrapper(*[open_file(path, mode=mode)[k] for k in key])
         else:  # have multipe keys and multiple files
-            return MultiDatasetWrapper(*[open_file(p, mode=mode)[k] for k in key for p in path])
+            return MultiDatasetWrapper(
+                *[open_file(p, mode=mode)[k] for k in key for p in path]
+            )

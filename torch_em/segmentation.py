@@ -1,19 +1,24 @@
 import os
 from glob import glob
-from typing import Any, Dict, Optional, Union, Tuple, List, Callable
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
 import torch.utils.data
 from torch.utils.data import DataLoader
 
+from .data import (
+    ConcatDataset,
+    ImageCollectionDataset,
+    SegmentationDataset,
+    TensorDataset,
+)
 from .loss import DiceLoss
-from .util import load_data
 from .trainer import DefaultTrainer
 from .trainer.tensorboard_logger import TensorboardLogger
 from .transform import get_augmentations, get_raw_transform
-from .data import ConcatDataset, ImageCollectionDataset, SegmentationDataset, TensorDataset
-
+from .util import load_data
 
 # TODO add a heuristic to estimate this from the number of epochs
 DEFAULT_SCHEDULER_KWARGS = {"mode": "min", "factor": 0.5, "patience": 5}
@@ -25,35 +30,41 @@ DEFAULT_SCHEDULER_KWARGS = {"mode": "min", "factor": 0.5, "patience": 5}
 # convenience functions for segmentation loaders
 #
 
+
 # TODO implement balanced and make it the default
 # def samples_to_datasets(n_samples, raw_paths, raw_key, split="balanced"):
 def samples_to_datasets(n_samples, raw_paths, raw_key, split="uniform"):
-    """@private
-    """
+    """@private"""
     assert split in ("balanced", "uniform")
     n_datasets = len(raw_paths)
     if split == "uniform":
         # even distribution of samples to datasets
         samples_per_ds = n_samples // n_datasets
         divider = n_samples % n_datasets
-        return [samples_per_ds + 1 if ii < divider else samples_per_ds for ii in range(n_datasets)]
+        return [
+            samples_per_ds + 1 if ii < divider else samples_per_ds
+            for ii in range(n_datasets)
+        ]
     else:
         # distribution of samples to dataset based on the dataset lens
         raise NotImplementedError
 
 
 def check_paths(raw_paths, label_paths):
-    """@private
-    """
+    """@private"""
     if not isinstance(raw_paths, type(label_paths)):
-        raise ValueError(f"Expect raw and label paths of same type, got {type(raw_paths)}, {type(label_paths)}")
+        raise ValueError(
+            f"Expect raw and label paths of same type, got {type(raw_paths)}, {type(label_paths)}"
+        )
 
     # This is a tensor dataset and we don't need to verify the paths.
-    if isinstance(raw_paths, list) and isinstance(raw_paths[0], (torch.Tensor, np.ndarray)):
+    if isinstance(raw_paths, list) and isinstance(
+        raw_paths[0], (torch.Tensor, np.ndarray)
+    ):
         return
 
     def _check_path(path):
-        if isinstance(path, str):
+        if isinstance(path, (str, Path)):
             if not os.path.exists(path):
                 raise ValueError(f"Could not find path {path}")
         else:
@@ -62,12 +73,14 @@ def check_paths(raw_paths, label_paths):
                 if not os.path.exists(per_path):
                     raise ValueError(f"Could not find path {per_path}")
 
-    if isinstance(raw_paths, str):
+    if isinstance(raw_paths, (str, Path)):
         _check_path(raw_paths)
         _check_path(label_paths)
     else:
         if len(raw_paths) != len(label_paths):
-            raise ValueError(f"Expect same number of raw and label paths, got {len(raw_paths)}, {len(label_paths)}")
+            raise ValueError(
+                f"Expect same number of raw and label paths, got {len(raw_paths)}, {len(label_paths)}"
+            )
         for rp, lp in zip(raw_paths, label_paths):
             _check_path(rp)
             _check_path(lp)
@@ -75,9 +88,10 @@ def check_paths(raw_paths, label_paths):
 
 # Check if we can load the data as SegmentationDataset.
 def is_segmentation_dataset(raw_paths, raw_key, label_paths, label_key):
-    """@private
-    """
-    if isinstance(raw_paths, list) and isinstance(raw_paths[0], (np.ndarray, torch.Tensor)):
+    """@private"""
+    if isinstance(raw_paths, list) and isinstance(
+        raw_paths[0], (np.ndarray, torch.Tensor)
+    ):
         if not all(isinstance(rp, (np.ndarray, torch.Tensor)) for rp in raw_paths):
             raise ValueError("Inconsistent raw data")
         if not all(isinstance(lp, (np.ndarray, torch.Tensor)) for lp in label_paths):
@@ -118,7 +132,9 @@ def _load_segmentation_dataset(raw_paths, raw_key, label_paths, label_key, **kwa
             assert isinstance(rois, (tuple, slice))
             if isinstance(rois, tuple):
                 assert all(isinstance(roi, slice) for roi in rois)
-        ds = SegmentationDataset(raw_paths, raw_key, label_paths, label_key, roi=rois, **kwargs)
+        ds = SegmentationDataset(
+            raw_paths, raw_key, label_paths, label_key, roi=rois, **kwargs
+        )
     else:
         assert len(raw_paths) > 0
         if rois is not None:
@@ -127,36 +143,54 @@ def _load_segmentation_dataset(raw_paths, raw_key, label_paths, label_key, **kwa
         n_samples = kwargs.pop("n_samples", None)
 
         samples_per_ds = (
-            [None] * len(raw_paths) if n_samples is None else samples_to_datasets(n_samples, raw_paths, raw_key)
+            [None] * len(raw_paths)
+            if n_samples is None
+            else samples_to_datasets(n_samples, raw_paths, raw_key)
         )
         ds = []
         for i, (raw_path, label_path) in enumerate(zip(raw_paths, label_paths)):
             roi = None if rois is None else rois[i]
             dset = SegmentationDataset(
-                raw_path, raw_key, label_path, label_key, roi=roi, n_samples=samples_per_ds[i], **kwargs
+                raw_path,
+                raw_key,
+                label_path,
+                label_key,
+                roi=roi,
+                n_samples=samples_per_ds[i],
+                **kwargs,
             )
             ds.append(dset)
         ds = ConcatDataset(*ds)
     return ds
 
 
-def _load_image_collection_dataset(raw_paths, raw_key, label_paths, label_key, roi, with_channels, **kwargs):
+def _load_image_collection_dataset(
+    raw_paths, raw_key, label_paths, label_key, roi, with_channels, **kwargs
+):
     if isinstance(raw_paths[0], (torch.Tensor, np.ndarray)):
         assert raw_key is None and label_key is None
         assert roi is None
-        kwargs.pop("pre_label_transform")  # NOTE: The 'TensorDataset' currently does not support samplers.
-        return TensorDataset(raw_paths, label_paths, with_channels=with_channels, **kwargs)
+        kwargs.pop(
+            "pre_label_transform"
+        )  # NOTE: The 'TensorDataset' currently does not support samplers.
+        return TensorDataset(
+            raw_paths, label_paths, with_channels=with_channels, **kwargs
+        )
 
     def _get_paths(rpath, rkey, lpath, lkey, this_roi):
         rpath = glob(os.path.join(rpath, rkey))
         rpath.sort()
         if len(rpath) == 0:
-            raise ValueError(f"Could not find any images for pattern {os.path.join(rpath, rkey)}")
+            raise ValueError(
+                f"Could not find any images for pattern {os.path.join(rpath, rkey)}"
+            )
 
         lpath = glob(os.path.join(lpath, lkey))
         lpath.sort()
         if len(rpath) != len(lpath):
-            raise ValueError(f"Expect same number of raw and label images, got {len(rpath)}, {len(lpath)}")
+            raise ValueError(
+                f"Expect same number of raw and label images, got {len(rpath)}, {len(lpath)}"
+            )
 
         if this_roi is not None:
             rpath, lpath = rpath[roi], lpath[roi]
@@ -167,33 +201,55 @@ def _load_image_collection_dataset(raw_paths, raw_key, label_paths, label_key, r
     if patch_shape is not None:
         if len(patch_shape) == 3:
             if patch_shape[0] != 1:
-                raise ValueError(f"Image collection dataset expects 2d patch shape, got {patch_shape}")
+                raise ValueError(
+                    f"Image collection dataset expects 2d patch shape, got {patch_shape}"
+                )
             patch_shape = patch_shape[1:]
         assert len(patch_shape) == 2
-
-    if isinstance(raw_paths, str):
-        raw_paths, label_paths = _get_paths(raw_paths, raw_key, label_paths, label_key, roi)
-        ds = ImageCollectionDataset(raw_paths, label_paths, patch_shape=patch_shape, **kwargs)
+    breakpoint()
+    if isinstance(raw_paths, (str, Path)):
+        raw_paths, label_paths = _get_paths(
+            raw_paths, raw_key, label_paths, label_key, roi
+        )
+        ds = ImageCollectionDataset(
+            raw_paths, label_paths, patch_shape=patch_shape, **kwargs
+        )
 
     elif raw_key is None:
         assert label_key is None
-        assert isinstance(raw_paths, (list, tuple)) and isinstance(label_paths, (list, tuple))
+        assert isinstance(raw_paths, (list, tuple)) and isinstance(
+            label_paths, (list, tuple)
+        )
         assert len(raw_paths) == len(label_paths)
-        ds = ImageCollectionDataset(raw_paths, label_paths, patch_shape=patch_shape, **kwargs)
+        ds = ImageCollectionDataset(
+            raw_paths, label_paths, patch_shape=patch_shape, **kwargs
+        )
 
     else:
         ds = []
         n_samples = kwargs.pop("n_samples", None)
         samples_per_ds = (
-            [None] * len(raw_paths) if n_samples is None else samples_to_datasets(n_samples, raw_paths, raw_key)
+            [None] * len(raw_paths)
+            if n_samples is None
+            else samples_to_datasets(n_samples, raw_paths, raw_key)
         )
         if roi is None:
             roi = len(raw_paths) * [None]
         assert len(roi) == len(raw_paths)
-        for i, (raw_path, label_path, this_roi) in enumerate(zip(raw_paths, label_paths, roi)):
+        for i, (raw_path, label_path, this_roi) in enumerate(
+            zip(raw_paths, label_paths, roi)
+        ):
             print(raw_path, label_path, this_roi)
-            rpath, lpath = _get_paths(raw_path, raw_key, label_path, label_key, this_roi)
-            dset = ImageCollectionDataset(rpath, lpath, patch_shape=patch_shape, n_samples=samples_per_ds[i], **kwargs)
+            rpath, lpath = _get_paths(
+                raw_path, raw_key, label_path, label_key, this_roi
+            )
+            dset = ImageCollectionDataset(
+                rpath,
+                lpath,
+                patch_shape=patch_shape,
+                n_samples=samples_per_ds[i],
+                **kwargs,
+            )
             ds.append(dset)
         ds = ConcatDataset(*ds)
 
@@ -388,7 +444,9 @@ def default_segmentation_dataset(
         check_paths(raw_paths, label_paths)
 
     if is_seg_dataset is None:
-        is_seg_dataset = is_segmentation_dataset(raw_paths, raw_key, label_paths, label_key)
+        is_seg_dataset = is_segmentation_dataset(
+            raw_paths, raw_key, label_paths, label_key
+        )
 
     # We always use a raw transform in the convenience function.
     if raw_transform is None:
@@ -397,7 +455,10 @@ def default_segmentation_dataset(
     # We always use augmentations in the convenience function.
     if transform is None:
         transform = _get_default_transform(
-            raw_paths if isinstance(raw_paths, str) else raw_paths[0], raw_key, is_seg_dataset, ndim
+            raw_paths if isinstance(raw_paths, str) else raw_paths[0],
+            raw_key,
+            is_seg_dataset,
+            ndim,
         )
 
     if is_seg_dataset:
@@ -448,11 +509,14 @@ def default_segmentation_dataset(
     return ds
 
 
-def get_data_loader(dataset: torch.utils.data.Dataset, batch_size: int, **loader_kwargs) -> torch.utils.data.DataLoader:
-    """@private
-    """
+def get_data_loader(
+    dataset: torch.utils.data.Dataset, batch_size: int, **loader_kwargs
+) -> torch.utils.data.DataLoader:
+    """@private"""
     pin_memory = loader_kwargs.pop("pin_memory", True)
-    loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, pin_memory=pin_memory, **loader_kwargs)
+    loader = torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, pin_memory=pin_memory, **loader_kwargs
+    )
     # monkey patch shuffle attribute to the loader
     loader.shuffle = loader_kwargs.get("shuffle", False)
     return loader
@@ -537,14 +601,20 @@ def default_segmentation_trainer(
     Returns:
         The trainer.
     """
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, **optimizer_kwargs)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, **scheduler_kwargs)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=learning_rate, **optimizer_kwargs
+    )
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, **scheduler_kwargs
+    )
 
     loss = DiceLoss() if loss is None else loss
     metric = DiceLoss() if metric is None else metric
 
     if device is None:
-        device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        device = (
+            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        )
     else:
         device = torch.device(device)
 
