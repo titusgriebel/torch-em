@@ -1,5 +1,6 @@
 import os
 from glob import glob
+from pathlib import Path
 from typing import Any, Dict, Optional, Union, Tuple, List, Callable
 
 import numpy as np
@@ -53,7 +54,7 @@ def check_paths(raw_paths, label_paths):
         return
 
     def _check_path(path):
-        if isinstance(path, str):
+        if isinstance(path, (str, Path)):
             if not os.path.exists(path):
                 raise ValueError(f"Could not find path {path}")
         else:
@@ -62,7 +63,7 @@ def check_paths(raw_paths, label_paths):
                 if not os.path.exists(per_path):
                     raise ValueError(f"Could not find path {per_path}")
 
-    if isinstance(raw_paths, str):
+    if isinstance(raw_paths, (str, Path)):
         _check_path(raw_paths)
         _check_path(label_paths)
     else:
@@ -91,7 +92,7 @@ def is_segmentation_dataset(raw_paths, raw_key, label_paths, label_key):
         except Exception:
             return False
 
-    if isinstance(raw_paths, str):
+    if isinstance(raw_paths, (str, Path)):
         can_open_raw = _can_open(raw_paths, raw_key)
         can_open_label = _can_open(label_paths, label_key)
     else:
@@ -113,7 +114,7 @@ def is_segmentation_dataset(raw_paths, raw_key, label_paths, label_key):
 
 def _load_segmentation_dataset(raw_paths, raw_key, label_paths, label_key, **kwargs):
     rois = kwargs.pop("rois", None)
-    if isinstance(raw_paths, str):
+    if isinstance(raw_paths, (str, Path)):
         if rois is not None:
             assert isinstance(rois, (tuple, slice))
             if isinstance(rois, tuple):
@@ -171,7 +172,7 @@ def _load_image_collection_dataset(raw_paths, raw_key, label_paths, label_key, r
             patch_shape = patch_shape[1:]
         assert len(patch_shape) == 2
 
-    if isinstance(raw_paths, str):
+    if isinstance(raw_paths, (str, Path)):
         raw_paths, label_paths = _get_paths(raw_paths, raw_key, label_paths, label_key, roi)
         ds = ImageCollectionDataset(raw_paths, label_paths, patch_shape=patch_shape, **kwargs)
 
@@ -397,7 +398,7 @@ def default_segmentation_dataset(
     # We always use augmentations in the convenience function.
     if transform is None:
         transform = _get_default_transform(
-            raw_paths if isinstance(raw_paths, str) else raw_paths[0], raw_key, is_seg_dataset, ndim
+            raw_paths if isinstance(raw_paths, (str, Path)) else raw_paths[0], raw_key, is_seg_dataset, ndim
         )
 
     if is_seg_dataset:
