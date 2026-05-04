@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Optional, Sequence, Union
 
 import imageio.v3 as imageio
@@ -87,8 +88,8 @@ def load_data(
     Returns:
         The loaded data.
     """
-    have_single_file = isinstance(path, str)
-    have_single_key = isinstance(key, str)
+    have_single_file = isinstance(path, (str, Path))
+    have_single_key = isinstance(key, (str, Path))
 
     # mrc files require key="data"; set it automatically if no key was provided
     if key is None:
